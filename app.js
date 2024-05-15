@@ -22,20 +22,20 @@ const calendar = google.calendar({ version: 'v3', auth });
 // Route to get events
 app.get('/events', async (req, res) => {
   try {
-    // Get query parameters
     const { day, start, end, summary } = req.query;
 
-    // Check the validity of parameters
+    // Verifica si los parámetros requeridos están presentes
     if (!day && (!start || !end)) {
-      return res.status(400).send('Day parameter is required or start and end parameters are required');
+      return res.status(400).send('Day parameter is required or both start and end parameters are required');
     }
 
-    // Calculate time bounds
+    // Calcula los límites de tiempo
     let timeMin, timeMax;
     if (day) {
       const startOfDay = new Date(day);
+      startOfDay.setHours(0, 0, 0, 0);
       const endOfDay = new Date(day);
-      endOfDay.setDate(endOfDay.getDate() + 1);
+      endOfDay.setHours(23, 59, 59, 999);
       timeMin = startOfDay.toISOString();
       timeMax = endOfDay.toISOString();
     } else {
@@ -43,9 +43,9 @@ app.get('/events', async (req, res) => {
       timeMax = new Date(end).toISOString();
     }
 
-    // Build filter for events query
+    // Construye el filtro para la consulta de eventos
     const filter = {
-      calendarId: process.env.CALENDAR_ID, // Use calendar ID from environment variables
+      calendarId: process.env.CALENDAR_ID,
       timeMin: timeMin,
       timeMax: timeMax,
       maxResults: 2500,
@@ -53,22 +53,20 @@ app.get('/events', async (req, res) => {
       orderBy: 'startTime',
     };
 
-    // Perform events query
+    // Realiza la consulta de eventos
     const response = await calendar.events.list(filter);
 
-    // Format retrieved events
+    // Formatea los eventos recuperados
     const events = response.data.items.map(event => ({
-      summary: event.summary, // Keep event summary as it is in Google Calendar
+      summary: event.summary,
       start: new Date(event.start.dateTime).toLocaleString(),
       end: new Date(event.end.dateTime).toLocaleString(),
     }));
 
-    // Filter events based on summary (case-insensitive and substring search)
-    const filteredEvents = events.filter(event => {
-      return event.summary.toLowerCase().includes(summary.toLowerCase());
-    });
+    // Filtra eventos basado en el resumen, si se proporciona
+    const filteredEvents = summary ? events.filter(event => event.summary.toLowerCase().includes(summary.toLowerCase())) : events;
 
-    // Respond with filtered events
+    // Responde con los eventos filtrados
     res.json(filteredEvents);
   } catch (error) {
     console.error('Error fetching events from Google Calendar:', error);
