@@ -1,0 +1,15 @@
+{
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "googleapis": "^137.1.0"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "nodemon": "^2.0.13"
+  },
+  "scripts": {
+    "start": "node app.js",
+    "dev": "cross-env DEBUG=NodeGCalConnect:* nodemon app.js"
+  }
+}
