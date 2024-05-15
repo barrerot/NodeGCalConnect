@@ -19,8 +19,8 @@ Antes de comenzar, asegúrate de tener los siguientes requisitos previos instala
 
 1. **Clona el repositorio**
    ```bash
-   git clone [https://github.com/barrerot/NodeGCalConnect.git]
-   cd [NodeGCalConnect]
+   git clone https://github.com/barrerot/NodeGCalConnect.git
+   cd NodeGCalConnect
    ```
 
 2. **Instala las dependencias**
