@@ -6,10 +6,13 @@ const key = require('./credentials.json');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Define authentication scopes
-const SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
+// Middleware to parse JSON bodies
+app.use(express.json());
 
-// Configure authentication
+// Define authentication scopes for Google Calendar API
+const SCOPES = ['https://www.googleapis.com/auth/calendar'];
+
+// Configure authentication using JWT from service account credentials
 const auth = new google.auth.JWT({
   email: key.client_email,
   key: key.private_key,
@@ -19,31 +22,48 @@ const auth = new google.auth.JWT({
 // Create Google Calendar client instance
 const calendar = google.calendar({ version: 'v3', auth });
 
-// Route to get events
+// Helper function to validate date strings in YYYY-MM-DD format
+function isValidDate(dateString) {
+  const regex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dateString.match(regex)) return false;
+  const date = new Date(dateString);
+  const timestamp = date.getTime();
+  if (typeof timestamp !== 'number' || Number.isNaN(timestamp)) return false;
+  return dateString === date.toISOString().split('T')[0];
+}
+
+// Route to get events from Google Calendar
 app.get('/events', async (req, res) => {
   try {
     const { day, start, end, summary } = req.query;
 
-    // Verifica si los parámetros requeridos están presentes
+    // Validate query parameters
     if (!day && (!start || !end)) {
       return res.status(400).send('Day parameter is required or both start and end parameters are required');
     }
 
-    // Calcula los límites de tiempo
+    // Determine time range for the query
     let timeMin, timeMax;
     if (day) {
-      const startOfDay = new Date(day);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(day);
-      endOfDay.setHours(23, 59, 59, 999);
+      if (!isValidDate(day)) {
+        return res.status(400).send('Invalid day format. Expected YYYY-MM-DD.');
+      }
+      const startOfDay = new Date(`${day}T00:00:00Z`);
+      const endOfDay = new Date(`${day}T23:59:59Z`);
       timeMin = startOfDay.toISOString();
       timeMax = endOfDay.toISOString();
     } else {
-      timeMin = new Date(start).toISOString();
-      timeMax = new Date(end).toISOString();
+      // Parse start and end dates in YYYY-MM-DD format
+      if (!isValidDate(start) || !isValidDate(end)) {
+        return res.status(400).send('Invalid start or end date format. Expected YYYY-MM-DD.');
+      }
+      const startDate = new Date(`${start}T00:00:00Z`);
+      const endDate = new Date(`${end}T23:59:59Z`);
+      timeMin = startDate.toISOString();
+      timeMax = endDate.toISOString();
     }
 
-    // Construye el filtro para la consulta de eventos
+    // Set parameters for the events list query
     const filter = {
       calendarId: process.env.CALENDAR_ID,
       timeMin: timeMin,
@@ -53,20 +73,20 @@ app.get('/events', async (req, res) => {
       orderBy: 'startTime',
     };
 
-    // Realiza la consulta de eventos
+    // Fetch events from Google Calendar
     const response = await calendar.events.list(filter);
 
-    // Formatea los eventos recuperados
+    // Map events to a simplified structure
     const events = response.data.items.map(event => ({
       summary: event.summary,
       start: new Date(event.start.dateTime).toLocaleString(),
       end: new Date(event.end.dateTime).toLocaleString(),
     }));
 
-    // Filtra eventos basado en el resumen, si se proporciona
+    // Filter events by summary if provided
     const filteredEvents = summary ? events.filter(event => event.summary.toLowerCase().includes(summary.toLowerCase())) : events;
 
-    // Responde con los eventos filtrados
+    // Respond with the filtered events
     res.json(filteredEvents);
   } catch (error) {
     console.error('Error fetching events from Google Calendar:', error);
@@ -74,10 +94,111 @@ app.get('/events', async (req, res) => {
   }
 });
 
-// Start the server
+// Route to create a new event in Google Calendar
+app.post('/events', async (req, res) => {
+  try {
+    const { summary, description, location, startDateTime, endDateTime } = req.body;
+
+    // Validate request body parameters
+    if (!summary || !startDateTime || !endDateTime) {
+      return res.status(400).send('Summary, startDateTime and endDateTime are required');
+    }
+
+    // Define the event object
+    const event = {
+      summary: summary,
+      description: description,
+      location: location,
+      start: {
+        dateTime: new Date(startDateTime).toISOString(),
+        timeZone: 'UTC',
+      },
+      end: {
+        dateTime: new Date(endDateTime).toISOString(),
+        timeZone: 'UTC',
+      },
+    };
+
+    // Insert the new event into Google Calendar
+    const response = await calendar.events.insert({
+      calendarId: process.env.CALENDAR_ID,
+      resource: event,
+    });
+
+    // Respond with the created event
+    res.status(201).json(response.data);
+  } catch (error) {
+    console.error('Error creating event in Google Calendar:', error.response ? error.response.data : error.message);
+    res.status(500).send('Error creating event in Google Calendar');
+  }
+});
+
+// Route to update an existing event in Google Calendar
+app.put('/events/:eventId', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const { summary, description, location, startDateTime, endDateTime } = req.body;
+
+    // Validate request body and URL parameters
+    if (!eventId || !summary || !startDateTime || !endDateTime) {
+      return res.status(400).send('Event ID, summary, startDateTime, and endDateTime are required');
+    }
+
+    // Define the updated event object
+    const event = {
+      summary: summary,
+      description: description,
+      location: location,
+      start: {
+        dateTime: new Date(startDateTime).toISOString(),
+        timeZone: 'UTC',
+      },
+      end: {
+        dateTime: new Date(endDateTime).toISOString(),
+        timeZone: 'UTC',
+      },
+    };
+
+    // Update the event in Google Calendar
+    const response = await calendar.events.update({
+      calendarId: process.env.CALENDAR_ID,
+      eventId: eventId,
+      resource: event,
+    });
+
+    // Respond with the updated event
+    res.status(200).json(response.data);
+  } catch (error) {
+    console.error('Error updating event in Google Calendar:', error.response ? error.response.data : error.message);
+    res.status(500).send('Error updating event in Google Calendar');
+  }
+});
+
+// Route to delete an existing event in Google Calendar
+app.delete('/events/:eventId', async (req, res) => {
+  try {
+    const { eventId } = req.params;
+
+    // Validate URL parameter
+    if (!eventId) {
+      return res.status(400).send('Event ID is required');
+    }
+
+    // Delete the event from Google Calendar
+    await calendar.events.delete({
+      calendarId: process.env.CALENDAR_ID,
+      eventId: eventId,
+    });
+
+    // Respond with no content status
+    res.status(204).send(); // No Content
+  } catch (error) {
+    console.error('Error deleting event in Google Calendar:', error.response ? error.response.data : error.message);
+    res.status(500).send('Error deleting event in Google Calendar');
+  }
+});
+
+// Start the Express server
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
-
-// Export the app for testing purposes
-module.exports = app;
